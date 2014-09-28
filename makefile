@@ -1,3 +1,4 @@
+#compiler define
 CC := gcc
 
 # compiler flags:
@@ -10,6 +11,7 @@ SOURCES := client.c server.c
 PROGRAMS := $(patsubst %.c, %, $(SOURCES))
 SUFFIX := .exe
 
+#binary and object defines
 BINS := $(patsubst %, %$(SUFFIX), $(PROGRAMS))
 OBJS := $(patsubst %, %.o, $(PROGRAMS))
 
@@ -19,9 +21,11 @@ all : $(BINS)
 OBJ = $(patsubst %$(SUFFIX), %.o, $@)
 BIN = $(patsubst %$(SUFFIX), %, $@)
 
+#actual compiling 
 %$(SUFFIX) : $(OBJS)
 	$(CC) $(CFLAGS) $(OBJ) -o $(BIN)
 
+## cleanups
 clean:
 	$(RM) $(PROGRAMS)
 
