@@ -4,7 +4,7 @@ CC := gcc
 # compiler flags:
   # -g     	adds debugging information to the executable file
   # -Wall  	turns on most, but not all, compiler warnings
-CFLAGS := -g -Wall
+CFLAGS := -g -Wall -pthread -std=c99
 
 # soruce file defines
 SOURCES := client.c server.c
@@ -27,7 +27,7 @@ BIN = $(patsubst %$(SUFFIX), %, $@)
 
 ## cleanups
 clean:
-	rm $(PROGRAMS) 
-	rm -rf *~
-
+	rm -f *~
+	rm -f $(PROGRAMS) 
+	
 rebuild: clean all
