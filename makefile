@@ -27,6 +27,7 @@ BIN = $(patsubst %$(SUFFIX), %, $@)
 
 ## cleanups
 clean:
-	$(RM) $(PROGRAMS)
+	rm $(PROGRAMS) 
+	rm -rf *~
 
 rebuild: clean all
