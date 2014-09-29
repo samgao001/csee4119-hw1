@@ -39,7 +39,7 @@ int login_count = 0;
 /******************* Function Prototype **************************/
 void load_user_info(void);
 void error(char* str);
-int find_index(char* str[], char* str1, int len);
+int find_index(char (*str)[USER_PASS_SIZE], char* str1, int len);
 
 void* client_handler(void*);
 
@@ -145,6 +145,7 @@ void load_user_info(void)
 	while(!feof(inFile)) 
 	{
 		item_read = fscanf(inFile, "%s %s", user[user_count], pass[user_count]);
+		//printf("%s %s\n",user[user_count], pass[user_count]);
 		user_count++;
 		
 		// check if it reads an empty line
@@ -167,7 +168,7 @@ void load_user_info(void)
 	fclose(inFile);
 }
 
-int find_index(char* str[], char* str1, int len)
+int find_index(char (*str)[USER_PASS_SIZE], char* str1, int len)
 {
 	bool listed = false;
 	int index = -1;
@@ -176,7 +177,7 @@ int find_index(char* str[], char* str1, int len)
 	{
 		listed = strcmp(str[i], str1);
 		
-		if (listed)
+		if (listed == 0)
 		{
 			index = i;
 			break;
@@ -190,19 +191,77 @@ void* client_handler(void* client_socket)
 {
 	int socket_id = *(int*) client_socket;
 	int len;
-	char* msg, client_msg[CLIENT_BUFF_LEN];
+	int login_count = 0;
+	bool logged_in = false;
+	char* msg;
+	char* client_msg[CLIENT_BUFF_LEN];
 	int user_index;
+	char* username = "";
+	char* password = "";
 	
-	msg = "Username: ";
-	send(socket_id, msg, strlen(msg), 0);
+	do
+	{
+		msg = "Username: ";
+		send(socket_id, msg, strlen(msg), 0);
 	
-	// Receive a message from client
-    len = recv(socket_id, client_msg, USER_PASS_SIZE, 0);
-    
-    if(len > 0)
-    {
-    	user_index = find_index(user, &client_msg);
-    }
-
+		// Receive a message from client
+		len = recv(socket_id, client_msg, USER_PASS_SIZE, 0);
+		if(len > 0)
+		{
+			memcpy(username, client_msg, len);
+		}
+		
+		msg = "Password: ";
+		send(socket_id, msg, strlen(msg), 0);
+	
+		// Receive a message from client
+		len = recv(socket_id, client_msg, USER_PASS_SIZE, 0);
+		if(len > 0)
+		{
+			memcpy(password, client_msg, len);
+		}
+		
+		if(strlen(username) > 0 && strlen(password) > 0)
+		{
+			user_index = find_index(user, username, user_count);
+			
+			if(user_index < 0)
+			{
+				login_count++;
+				if(login_count < 3)
+					sprintf(msg, "Authentication failed, please try again. Attempt = %d.", login_count);
+				else
+					sprintf(msg, "Authentication failed 3 times, you are now blocked for %d second(s).", BLOCK_TIME);
+			}
+			else
+			{
+				if(strcmp(pass[user_index], password) != 0)
+				{
+					login_count++;
+					if(login_count < 3)
+						sprintf(msg, "Authentication failed, please try again. Attempt = %d.", login_count);
+					else
+						sprintf(msg, "Authentication failed 3 times, you are now blocked for %d second(s).", BLOCK_TIME);
+				}
+				else
+				{
+					logged_in = true;
+					login_count = 0;
+					msg = "Logged in successfully. Welcome to TheChat!";
+				}
+			}
+		}
+		else
+		{
+			login_count++;
+			if(login_count < 3)
+				sprintf(msg, "Authentication failed, please try again. Attempt = %d.", login_count);
+			else
+				sprintf(msg, "Authentication failed 3 times, you are now blocked for %d second(s).", BLOCK_TIME);
+		}
+		
+		send(socket_id, msg, strlen(msg), 0);
+	}while((!logged_in) && (login_count < 3));
+	
 	return 0;
 }
