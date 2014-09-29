@@ -24,7 +24,7 @@
 #define USER_FILE			"user_pass.txt"
 #define MAX_USER			256
 #define USER_PASS_SIZE		32
-#define CLIENT_BUFF_LEN		1024
+#define CLIENT_BUFF_LEN		512
 
 #define BLOCK_TIME			60
 
@@ -84,6 +84,7 @@ int main(int argc, char* argv[])
 	if (bind(server_socket, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) 
 	{
 		error("Failed to bind.");
+		shutdown(server_socket, 2);
 		exit(EXIT_FAILURE);
 	}
 	
@@ -95,7 +96,7 @@ int main(int argc, char* argv[])
 	
 	while( (client_socket = accept(server_socket, (struct sockaddr *)&client_addr, (socklen_t*)&client_len)) )
 	{	
-		puts("Client accepted");
+		printf("Client(%s) accepted.\n", inet_ntoa(client_addr.sin_addr));
 		
 		new_socket = malloc(1);
         *new_socket = client_socket;
@@ -106,6 +107,7 @@ int main(int argc, char* argv[])
         if(pthread_create(&client_thread, NULL, client_handler, (void*) new_socket) < 0)
         {
             error("Could not create thread.");
+            shutdown(server_socket, 2);
             exit(EXIT_FAILURE);
         }
         
@@ -115,11 +117,12 @@ int main(int argc, char* argv[])
 	if(client_socket < 0)
 	{
 		error("Failed to accept client.");
+		shutdown(server_socket, 2);
 		exit(EXIT_FAILURE);
 	}
 	
 	pthread_exit(NULL);
-	
+	shutdown(server_socket, 2);
 	exit(EXIT_SUCCESS);
 }
 
@@ -170,7 +173,7 @@ void load_user_info(void)
 
 int find_index(char (*str)[USER_PASS_SIZE], char* str1, int len)
 {
-	bool listed = false;
+	int listed = false;
 	int index = -1;
 	
 	for(int i = 0; i < len; i++)
@@ -193,67 +196,97 @@ void* client_handler(void* client_socket)
 	int len;
 	int login_count = 0;
 	bool logged_in = false;
-	char* msg;
-	char* client_msg[CLIENT_BUFF_LEN];
+	
+	char msg[CLIENT_BUFF_LEN];
+	char client_msg[CLIENT_BUFF_LEN];
+	
 	int user_index;
-	char* username = "";
-	char* password = "";
+	char username[CLIENT_BUFF_LEN] = "";
+	char pre_username[CLIENT_BUFF_LEN] = "";
+	char password[CLIENT_BUFF_LEN] = "";
 	
 	do
 	{
-		msg = "Username: ";
-		send(socket_id, msg, strlen(msg), 0);
-	
+		memset(msg, 0, CLIENT_BUFF_LEN);
+		sprintf(msg, "Username: ");
+		len = send(socket_id, msg, strlen(msg), 0);
+		
+		if(len < 0)
+    	{
+    		error("Failed to send a message to client. Connection lost.");
+        	break;
+    	}
+		
 		// Receive a message from client
+		memset(client_msg, 0, CLIENT_BUFF_LEN);
 		len = recv(socket_id, client_msg, USER_PASS_SIZE, 0);
 		if(len > 0)
 		{
+			memset(username, 0, CLIENT_BUFF_LEN);
 			memcpy(username, client_msg, len);
-		}
-		
-		msg = "Password: ";
-		send(socket_id, msg, strlen(msg), 0);
-	
-		// Receive a message from client
-		len = recv(socket_id, client_msg, USER_PASS_SIZE, 0);
-		if(len > 0)
-		{
-			memcpy(password, client_msg, len);
-		}
-		
-		if(strlen(username) > 0 && strlen(password) > 0)
-		{
-			user_index = find_index(user, username, user_count);
 			
-			if(user_index < 0)
-			{
-				login_count++;
-				if(login_count < 3)
-					sprintf(msg, "Authentication failed, please try again. Attempt = %d.", login_count);
-				else
-					sprintf(msg, "Authentication failed 3 times, you are now blocked for %d second(s).", BLOCK_TIME);
-			}
-			else
-			{
-				if(strcmp(pass[user_index], password) != 0)
-				{
-					login_count++;
-					if(login_count < 3)
-						sprintf(msg, "Authentication failed, please try again. Attempt = %d.", login_count);
-					else
-						sprintf(msg, "Authentication failed 3 times, you are now blocked for %d second(s).", BLOCK_TIME);
-				}
-				else
-				{
-					logged_in = true;
-					login_count = 0;
-					msg = "Logged in successfully. Welcome to TheChat!";
-				}
-			}
+			if(strcmp(username, pre_username) != 0)
+				login_count = 0;
+				
+			memset(pre_username, 0, CLIENT_BUFF_LEN);
+			memcpy(pre_username, username, len);
 		}
 		else
 		{
+			error("Failed to read a message from client. Connection lost.");
+        	break;
+		}
+		
+		memset(msg, 0, CLIENT_BUFF_LEN);
+		sprintf(msg, "Password: ");
+		len = send(socket_id, msg, strlen(msg), 0);
+		
+		if(len < 0)
+    	{
+    		error("Failed to send a message to client. Connection lost.");
+        	break;
+    	}
+	
+		// Receive a message from client
+		memset(client_msg, 0, CLIENT_BUFF_LEN);
+		len = recv(socket_id, client_msg, USER_PASS_SIZE, 0);
+		if(len > 0)
+		{
+			memset(password, 0, CLIENT_BUFF_LEN);
+			memcpy(password, client_msg, len);
+		}
+		else
+		{
+			error("Failed to read a message from client. Connection lost.");
+        	break;
+		}
+
+		user_index = find_index(user, username, user_count);
+		
+		// check if the username exists in the list
+		if(user_index < 0)
+		{
 			login_count++;
+		}
+		else
+		{
+			// check the password associated with the username
+			if(strcmp(pass[user_index], password) != 0)
+			{
+				login_count++;
+			}
+			else
+			{
+				logged_in = true;
+				login_count = 0;
+				memset(msg, 0, CLIENT_BUFF_LEN);
+				sprintf(msg, "Logged in successfully. Welcome to TheChat!");
+			}
+		}
+		
+		if(!logged_in)
+		{
+			memset(msg, 0, CLIENT_BUFF_LEN);
 			if(login_count < 3)
 				sprintf(msg, "Authentication failed, please try again. Attempt = %d.", login_count);
 			else
@@ -261,7 +294,9 @@ void* client_handler(void* client_socket)
 		}
 		
 		send(socket_id, msg, strlen(msg), 0);
+		
 	}while((!logged_in) && (login_count < 3));
 	
+	free(client_socket);
 	return 0;
 }
