@@ -11,6 +11,7 @@
 #include <string.h>
 #include <stdlib.h>    		
 #include <stdbool.h>
+#include <signal.h>
 
 #include <sys/types.h> 
 #include <sys/socket.h>
@@ -36,19 +37,32 @@ char login_list[MAX_USER][USER_PASS_SIZE];
 int user_count = 0;
 int login_count = 0;
 
+int server_socket;
+int client_socket;
+int port_number;
+int client_len;
+int* new_socket;
+
 /******************* Function Prototype **************************/
 void load_user_info(void);
 void error(char* str);
 int find_index(char (*str)[USER_PASS_SIZE], char* str1, int len);
 
 void* client_handler(void*);
+void quitHandler();
 
 /******************* Main program ********************************/
 
+void quitHandler()
+{
+	printf("\nUser teminated server process.\n");
+	pthread_exit(NULL);
+	shutdown(server_socket, 2);
+	exit(EXIT_SUCCESS);
+}
+
 int main(int argc, char* argv[])
 {
-	int server_socket, client_socket, port_number, client_len;
-	int* new_socket;
 	struct sockaddr_in server_addr, client_addr;
 	//int status;
 	
@@ -58,6 +72,13 @@ int main(int argc, char* argv[])
 		error("No port provided.");
 		exit(EXIT_FAILURE);
 	}	
+	
+	// setup to capture process terminate signals
+	signal(SIGINT, quitHandler);
+	signal(SIGTERM, quitHandler);
+	signal(SIGKILL, quitHandler);
+	signal(SIGQUIT, quitHandler);
+	signal(SIGTSTP, quitHandler);
 	
 	// Load user name and password to the buffer
 	load_user_info();
@@ -190,9 +211,9 @@ int find_index(char (*str)[USER_PASS_SIZE], char* str1, int len)
 	return index;
 }
 
-void* client_handler(void* client_socket)
+void* client_handler(void* cli_socket)
 {
-	int socket_id = *(int*) client_socket;
+	int socket_id = *(int*) cli_socket;
 	int len;
 	int login_count = 0;
 	bool logged_in = false;
@@ -213,7 +234,7 @@ void* client_handler(void* client_socket)
 		
 		if(len < 0)
     	{
-    		error("Failed to send a message to client. Connection lost.");
+    		error("Connection lost.");
         	break;
     	}
 		
@@ -233,7 +254,7 @@ void* client_handler(void* client_socket)
 		}
 		else
 		{
-			error("Failed to read a message from client. Connection lost.");
+			error("Connection lost.");
         	break;
 		}
 		
@@ -243,7 +264,7 @@ void* client_handler(void* client_socket)
 		
 		if(len < 0)
     	{
-    		error("Failed to send a message to client. Connection lost.");
+    		error("Connection lost.");
         	break;
     	}
 	
@@ -257,7 +278,7 @@ void* client_handler(void* client_socket)
 		}
 		else
 		{
-			error("Failed to read a message from client. Connection lost.");
+			error("Connection lost.");
         	break;
 		}
 
@@ -297,6 +318,6 @@ void* client_handler(void* client_socket)
 		
 	}while((!logged_in) && (login_count < 3));
 	
-	free(client_socket);
+	shutdown(socket_id, 2);
 	return 0;
 }

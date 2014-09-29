@@ -28,16 +28,13 @@ int port_number;
 /******************* Function Prototype **************************/
 void error(char* str);
 
-// Forward declarations
-void (*originalQuitHandler)();
 void quitHandler();
 
 /******************* Main program ********************************/
 
 void quitHandler()
 {
-	// Control-C handler
-	printf("\nClient terminating...\n");
+	printf("\nUser teminated client process.\n");
 	shutdown(client_socket, 2);
 	exit(EXIT_SUCCESS);
 }
@@ -51,13 +48,17 @@ int main(int argc, char* argv[])
     char msg[BUFFER_SIZE] = "";
     char server_msg[BUFFER_SIZE] = "";
     
-    // Set the Control-C handler to catch keyboard interrupts
-	originalQuitHandler = signal(SIGINT, quitHandler);
-    
     if (argc < 3) {
     	error("Did not specify address and port number.");
     	exit(EXIT_FAILURE);
     }
+    
+    // setup to capture process terminate signals
+	signal(SIGINT, quitHandler);
+	signal(SIGTERM, quitHandler);
+	signal(SIGKILL, quitHandler);
+	signal(SIGQUIT, quitHandler);
+	signal(SIGTSTP, quitHandler);
     
     memset(&server_addr, 0, sizeof(server_addr));
     addr = argv[1];
