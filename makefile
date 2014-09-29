@@ -7,7 +7,7 @@ CC := gcc
 CFLAGS := -g -Wall -pthread -std=c99
 
 # soruce file defines
-SOURCES := client.c server.c
+SOURCES := Client.c Server.c
 PROGRAMS := $(patsubst %.c, %, $(SOURCES))
 SUFFIX := .exe
 
