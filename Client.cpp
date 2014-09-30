@@ -9,16 +9,20 @@
 /*********************** Includes *******************************/
 #include <stdio.h>
 #include <string.h>
-#include <stdlib.h>    	
-#include <stdbool.h>	
+#include <stdlib.h>    		
+#include <stdbool.h>
 #include <signal.h>
+#include <string>
+#include <iostream>
+#include <sstream>
 
 #include <sys/types.h> 
 #include <sys/socket.h>
 #include <netinet/in.h>		
 #include <arpa/inet.h> 
+#include <pthread.h> 
 
-#include "Client.h"
+using namespace std;
 
 /******************* User Defines ********************************/
 #define BUFFER_SIZE				512
@@ -28,15 +32,14 @@ int client_socket;
 int port_number;
 
 /******************* Function Prototype **************************/
-void error(char* str);
-
-void quitHandler();
+void error(string str);
+void quitHandler(int exit_code);
 
 /******************* Main program ********************************/
 
-void quitHandler()
+void quitHandler(int signal_code)
 {
-	printf("\nUser teminated client process.\n");
+	cout << endl << "User terminated client process." << endl;
 	shutdown(client_socket, 2);
 	exit(EXIT_SUCCESS);
 }
@@ -44,11 +47,9 @@ void quitHandler()
 int main(int argc, char* argv[])
 {
 	struct sockaddr_in server_addr;
-	int len = 0;
-	int count = 0;
-	char* addr = "";
-    char msg[BUFFER_SIZE] = "";
-    char server_msg[BUFFER_SIZE] = "";
+	string addr;
+    string server_msg = "";
+    char msg[BUFFER_SIZE];
     
     if (argc < 3) {
     	error("Did not specify address and port number.");
@@ -74,7 +75,7 @@ int main(int argc, char* argv[])
 		exit(EXIT_FAILURE);
 	}
 	
-	server_addr.sin_addr.s_addr = inet_addr(addr);
+	server_addr.sin_addr.s_addr = inet_addr(addr.c_str());
     server_addr.sin_family = PF_INET;
     server_addr.sin_port = htons(port_number);
 	
@@ -85,32 +86,31 @@ int main(int argc, char* argv[])
         exit(EXIT_FAILURE);
     }
     
-    printf("Connected to %s.\n", inet_ntoa(server_addr.sin_addr));
+    cout << "Connected to " << inet_ntoa(server_addr.sin_addr) << endl;
     
     while(1)
     {
     	// clear buffer
-    	memset(server_msg, 0, BUFFER_SIZE);
-        len = recv(client_socket, server_msg, BUFFER_SIZE, 0);
-        
-        if(len > 0)
+    	memset(msg, 0, BUFFER_SIZE);
+        if(recv(client_socket, msg, BUFFER_SIZE, 0) > 0)
         {
-        	if(strstr(server_msg, "Welcome") != NULL)
+        	server_msg = string(msg);
+        	if(server_msg.find("Welcome") != string::npos)
         	{
-        		puts(server_msg);
+        		cout << server_msg << endl;
         	}
-        	else if(strstr(server_msg, "failed") != NULL)
+        	else if(server_msg.find("failed") != string::npos)
         	{
-        		puts(server_msg);
+        		cout << server_msg << endl;
         	}
         	else
         	{
-        		printf("%s", server_msg);
-				fgets(msg, sizeof(msg), stdin);
+        		string msg1;
+        		cout << server_msg;
+				getline(cin, msg1);
+				strcpy(msg, msg1.c_str());
 				
-				count = send(client_socket, msg, (strlen(msg)-1)/*remove the newline character*/, 0);
-			
-				if(count < 0)
+				if(send(client_socket, msg, strlen(msg), 0) < 0)
 				{
 					error("Failed to send a message to server.");
 					break;
@@ -128,7 +128,7 @@ int main(int argc, char* argv[])
 	exit(EXIT_SUCCESS);
 }
 
-void error(char* str)
+void error(string str)
 {
-  fprintf(stderr, "ERROR: %s\n", str);
+	cout << "ERROR: " << str << endl;
 }

@@ -12,29 +12,34 @@
 #include <stdlib.h>    		
 #include <stdbool.h>
 #include <signal.h>
+#include <string>
+#include <iostream>
+#include <fstream>
+#include <sstream>
 
 #include <sys/types.h> 
 #include <sys/socket.h>
 #include <netinet/in.h>		
 #include <arpa/inet.h> 
-
 #include <pthread.h> 
 
-#include "Server.h"
+using namespace std;
 
 /******************* User Defines ********************************/
 
 #define USER_FILE			"user_pass.txt"
 #define MAX_USER			256
 #define USER_PASS_SIZE		32
-#define CLIENT_BUFF_LEN		512
-
+#define CLIENT_BUFF_SIZE	512
 #define BLOCK_TIME			60
 
 /******************* Global Variables ****************************/
-char user[MAX_USER][USER_PASS_SIZE];
-char pass[MAX_USER][USER_PASS_SIZE];
-char login_list[MAX_USER][USER_PASS_SIZE];
+string user[MAX_USER];
+string pass[MAX_USER];
+string login_list[MAX_USER];
+
+pthread_t client_tr[MAX_USER];
+int thread_count = 0;
 
 int user_count = 0;
 int user_online = 0;
@@ -43,27 +48,27 @@ int server_socket;
 int client_socket;
 int port_number;
 int client_len;
-int* new_socket;
 
 /******************* Function Prototype **************************/
 void load_user_info(void);
-void error(char* str);
-int find_index(char (*str)[USER_PASS_SIZE], char* str1, int len);
+void error(string str);
+int find_index(string str[MAX_USER], string str1, int len);
 
 void* client_handler(void*);
-void quitHandler();
+void quitHandler(int signal_code);
 
 /******************* Main program ********************************/
 
-void quitHandler()
+void quitHandler(int signal_code)
 {
-	printf("\nUser teminated server process.\n");
+	printf("\nUser terminated server process.\n");
 	shutdown(server_socket, 2);
 	exit(EXIT_SUCCESS);
 }
 
 int main(int argc, char* argv[])
 {
+	int new_socket;
 	struct sockaddr_in server_addr, client_addr;
 	//int status;
 	
@@ -113,24 +118,22 @@ int main(int argc, char* argv[])
 	listen(server_socket, user_count);
 	
 	// waiting for incoming connection
-	puts("Waiting for incoming connections...");
+	cout << "Waiting for incoming connections..." << endl;
 	client_len = sizeof(struct sockaddr_in);
 	
 	while( (client_socket = accept(server_socket, (struct sockaddr *)&client_addr, (socklen_t*)&client_len)) )
 	{	
-		printf("Client(%s) accepted.\n", inet_ntoa(client_addr.sin_addr));
-		
-		new_socket = malloc(1);
-        *new_socket = client_socket;
+		cout << "Client(" << inet_ntoa(client_addr.sin_addr) << ") accepted." << endl;
+        new_socket = client_socket;
         
-        // creates a new thread for each new client trying to connect.
-		pthread_t client_thread;
-		
-        if(pthread_create(&client_thread, NULL, client_handler, (void*) new_socket) < 0)
+        if(pthread_create(&client_tr[thread_count], NULL, client_handler, &new_socket) < 0)
         {
             error("Could not create thread.");
             shutdown(server_socket, 2);
-            exit(EXIT_FAILURE);
+        }
+        else
+        {
+        	thread_count++;
         }
 	}
 	
@@ -146,110 +149,86 @@ int main(int argc, char* argv[])
 	exit(EXIT_SUCCESS);
 }
 
-void error(char* str)
+void error(string str)
 {
-  fprintf(stderr, "ERROR: %s\n", str);
+	cout << "ERROR: " << str << endl;
 }
 
 void load_user_info(void)
 {
-	FILE* inFile;
-	int item_read = 0;
 	user_count = 0;
-
-	inFile = fopen(USER_FILE, "r");
-	if(inFile == NULL)
+	
+	ifstream inFile;
+	inFile.open(USER_FILE);
+	
+	if(!(inFile.is_open()))
 	{
 	   error("Failed to open input file, please check if such file exist.");
 	   exit(EXIT_FAILURE);
 	}
 
 	//keep reading until end of the file
-	while(!feof(inFile)) 
+	while(!(inFile.eof())) 
 	{
-		item_read = fscanf(inFile, "%s %s", user[user_count], pass[user_count]);
-		//printf("%s %s\n",user[user_count], pass[user_count]);
-		user_count++;
-		
-		// check if it reads an empty line
-		if(item_read == -1)
+		inFile >> user[user_count] >> pass[user_count];
+		/*cout << user[user_count] << ", " << user[user_count].size() << ", ";
+		cout << pass[user_count] << ", " << pass[user_count].size() << endl;*/
+		if(user[user_count].size() != 0 || pass[user_count].size() != 0)
 		{
-			// decrement the line count whenever an empty line is reached
-			// or end of the file is reached. if eof terminates the loop.
-			user_count--;
-			if(feof(inFile)) break;
-		}
-		else if(item_read != 2)
-		{
-			error("Failed to read user info.");
-			exit(EXIT_FAILURE);
-			break;
+			//end of the file reached, do not increment user count
+			user_count++;
 		}
 	}
 
 	// close file and free up memory
-	fclose(inFile);
+	inFile.close();
 }
 
-int find_index(char (*str)[USER_PASS_SIZE], char* str1, int len)
+int find_index(string str[MAX_USER], string str1, int len)
 {
-	int listed = false;
 	int index = -1;
 	
 	for(int i = 0; i < len; i++)
-	{
-		listed = strcmp(str[i], str1);
-		
-		if (listed == 0)
+	{		
+		if ((str[i].compare(str1)) == 0)
 		{
 			index = i;
 			break;
 		}
 	}
-	
 	return index;
 }
 
 void* client_handler(void* cli_socket)
 {
+	ostringstream oss;
 	int socket_id = *(int*) cli_socket;
-	int len;
 	int login_count = 0;
 	bool logged_in = false;
 	
-	char msg[CLIENT_BUFF_LEN];
-	char client_msg[CLIENT_BUFF_LEN];
-	
+	char msg[CLIENT_BUFF_SIZE];
 	int user_index;
-	char username[CLIENT_BUFF_LEN] = "";
-	char pre_username[CLIENT_BUFF_LEN] = "";
-	char password[CLIENT_BUFF_LEN] = "";
+	string username = "";
+	string pre_username = "";
+	string password = "";
 	
 	do
 	{
-		memset(msg, 0, CLIENT_BUFF_LEN);
+		memset(msg, 0, CLIENT_BUFF_SIZE);
 		sprintf(msg, "Username: ");
-		len = send(socket_id, msg, strlen(msg), 0);
-		
-		if(len < 0)
+		if(send(socket_id, msg, strlen(msg), 0) < 0)
     	{
     		error("Connection lost.");
         	break;
     	}
-		
 		// Receive a message from client 
-		memset(client_msg, 0, CLIENT_BUFF_LEN);
-		len = recv(socket_id, client_msg, USER_PASS_SIZE, 0);
-		if(len > 0)
+		memset(msg, 0, CLIENT_BUFF_SIZE);
+		if(recv(socket_id, msg, USER_PASS_SIZE, 0) > 0)
 		{
-			memset(username, 0, CLIENT_BUFF_LEN);
-			memcpy(username, client_msg, len);
-			
-			if(strcmp(username, pre_username) != 0)
+			username = string(msg);
+			if(username.compare(pre_username) != 0)
 				login_count = 0;
-				
-			memset(pre_username, 0, CLIENT_BUFF_LEN);
-			memcpy(pre_username, username, len);
+			pre_username = username;
 		}
 		else
 		{
@@ -257,23 +236,18 @@ void* client_handler(void* cli_socket)
         	break;
 		}
 		
-		memset(msg, 0, CLIENT_BUFF_LEN);
 		sprintf(msg, "Password: ");
-		len = send(socket_id, msg, strlen(msg), 0);
-		
-		if(len < 0)
+		if(send(socket_id, msg, strlen(msg), 0) < 0)
     	{
     		error("Connection lost.");
         	break;
     	}
 	
 		// Receive a message from client
-		memset(client_msg, 0, CLIENT_BUFF_LEN);
-		len = recv(socket_id, client_msg, USER_PASS_SIZE, 0);
-		if(len > 0)
+		memset(msg, 0, CLIENT_BUFF_SIZE);
+		if(recv(socket_id, msg, USER_PASS_SIZE, 0) > 0)
 		{
-			memset(password, 0, CLIENT_BUFF_LEN);
-			memcpy(password, client_msg, len);
+			password = string(msg);
 		}
 		else
 		{
@@ -291,7 +265,7 @@ void* client_handler(void* cli_socket)
 		else
 		{
 			// check the password associated with the username
-			if(strcmp(pass[user_index], password) != 0)
+			if(pass[user_index].compare(password) != 0)
 			{
 				login_count++;
 			}
@@ -299,23 +273,19 @@ void* client_handler(void* cli_socket)
 			{
 				logged_in = true;
 				login_count = 0;
-				memset(msg, 0, CLIENT_BUFF_LEN);
 				sprintf(msg, "Logged in successfully. Welcome to TheChat!");
 			}
 		}
 		
 		if(!logged_in)
 		{
-			memset(msg, 0, CLIENT_BUFF_LEN);
 			if(login_count < 3)
 				sprintf(msg, "Authentication failed, please try again. Attempt = %d.", login_count);
 			else
 				sprintf(msg, "Authentication failed 3 times, you are now blocked for %d second(s).", BLOCK_TIME);
 		}
 		
-		len = send(socket_id, msg, strlen(msg), 0);
-		
-		if(len < 0)
+		if(send(socket_id, msg, strlen(msg), 0) < 0)
     	{
     		error("Connection lost.");
         	break;
@@ -325,28 +295,24 @@ void* client_handler(void* cli_socket)
 	
 	while(logged_in)
 	{
-		memset(msg, 0, CLIENT_BUFF_LEN);
-		sprintf(msg, "%s :", username);
-		len = send(socket_id, msg, strlen(msg), 0);
-		
-		if(len < 0)
+		memset(msg, 0, CLIENT_BUFF_SIZE);
+		sprintf(msg, "%s :", username.c_str());
+		if(send(socket_id, msg, strlen(msg), 0) < 0)
     	{
     		error("Connection lost.");
         	break;
     	}
 		
 		// Receive a message from client
-		memset(client_msg, 0, CLIENT_BUFF_LEN);
-		len = recv(socket_id, client_msg, USER_PASS_SIZE, 0);
-		
-		if(len < 0)
+		memset(msg, 0, CLIENT_BUFF_SIZE);
+		if(recv(socket_id, msg, CLIENT_BUFF_SIZE, 0) < 0)
     	{
     		error("Connection lost.");
         	break;
     	}
     	else
     	{
-    		printf("%s\n", client_msg);
+    		cout << msg;
     	}
 	}
 	
