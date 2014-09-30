@@ -20,6 +20,8 @@
 
 #include <pthread.h> 
 
+#include "Server.h"
+
 /******************* User Defines ********************************/
 
 #define USER_FILE			"user_pass.txt"
@@ -35,7 +37,7 @@ char pass[MAX_USER][USER_PASS_SIZE];
 char login_list[MAX_USER][USER_PASS_SIZE];
 
 int user_count = 0;
-int login_count = 0;
+int user_online = 0;
 
 int server_socket;
 int client_socket;
@@ -56,7 +58,6 @@ void quitHandler();
 void quitHandler()
 {
 	printf("\nUser teminated server process.\n");
-	pthread_exit(NULL);
 	shutdown(server_socket, 2);
 	exit(EXIT_SUCCESS);
 }
@@ -131,8 +132,6 @@ int main(int argc, char* argv[])
             shutdown(server_socket, 2);
             exit(EXIT_FAILURE);
         }
-        
-        pthread_join(client_thread , NULL);
 	}
 	
 	if(client_socket < 0)
@@ -238,7 +237,7 @@ void* client_handler(void* cli_socket)
         	break;
     	}
 		
-		// Receive a message from client
+		// Receive a message from client 
 		memset(client_msg, 0, CLIENT_BUFF_LEN);
 		len = recv(socket_id, client_msg, USER_PASS_SIZE, 0);
 		if(len > 0)
@@ -271,7 +270,7 @@ void* client_handler(void* cli_socket)
 		// Receive a message from client
 		memset(client_msg, 0, CLIENT_BUFF_LEN);
 		len = recv(socket_id, client_msg, USER_PASS_SIZE, 0);
-		if(len > 0)if
+		if(len > 0)
 		{
 			memset(password, 0, CLIENT_BUFF_LEN);
 			memcpy(password, client_msg, len);
@@ -314,9 +313,42 @@ void* client_handler(void* cli_socket)
 				sprintf(msg, "Authentication failed 3 times, you are now blocked for %d second(s).", BLOCK_TIME);
 		}
 		
-		send(socket_id, msg, strlen(msg), 0);
+		len = send(socket_id, msg, strlen(msg), 0);
+		
+		if(len < 0)
+    	{
+    		error("Connection lost.");
+        	break;
+    	}
 		
 	}while((!logged_in) && (login_count < 3));
+	
+	while(logged_in)
+	{
+		memset(msg, 0, CLIENT_BUFF_LEN);
+		sprintf(msg, "%s :", username);
+		len = send(socket_id, msg, strlen(msg), 0);
+		
+		if(len < 0)
+    	{
+    		error("Connection lost.");
+        	break;
+    	}
+		
+		// Receive a message from client
+		memset(client_msg, 0, CLIENT_BUFF_LEN);
+		len = recv(socket_id, client_msg, USER_PASS_SIZE, 0);
+		
+		if(len < 0)
+    	{
+    		error("Connection lost.");
+        	break;
+    	}
+    	else
+    	{
+    		printf("%s\n", client_msg);
+    	}
+	}
 	
 	shutdown(socket_id, 2);
 	return 0;

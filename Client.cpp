@@ -18,6 +18,8 @@
 #include <netinet/in.h>		
 #include <arpa/inet.h> 
 
+#include "Client.h"
+
 /******************* User Defines ********************************/
 #define BUFFER_SIZE				512
 

@@ -1,10 +1,10 @@
 #compiler define
-CC := gcc
+CC := g++
 
 # compiler flags:
   # -g     	adds debugging information to the executable file
   # -Wall  	turns on most, but not all, compiler warnings
-CFLAGS := -g -Wall -pthread -std=c99
+CFLAGS := -g -Wall -pthread
 
 # soruce file defines
 SOURCES := Client.c Server.c
