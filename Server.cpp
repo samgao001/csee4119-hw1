@@ -16,6 +16,7 @@
 #include <iostream>
 #include <fstream>
 #include <sstream>
+#include <map>
 
 #include <sys/types.h> 
 #include <sys/socket.h>
@@ -33,10 +34,20 @@ using namespace std;
 #define CLIENT_BUFF_SIZE	512
 #define BLOCK_TIME			60
 
+typedef struct server_t
+{
+	int socket_id;
+	string username;
+	string password;
+	time_t time_stamp;
+	pthread_t client_tr;
+}server;
+
 /******************* Global Variables ****************************/
 string user[MAX_USER];
 string pass[MAX_USER];
-string login_list[MAX_USER];
+
+map<string, server> login_users;
 
 pthread_t client_tr[MAX_USER];
 int thread_count = 0;
@@ -62,7 +73,7 @@ void quitHandler(int signal_code);
 void quitHandler(int signal_code)
 {
 	printf("\nUser terminated server process.\n");
-	shutdown(server_socket, 2);
+	shutdown(server_socket, SHUT_RDWR);
 	exit(EXIT_SUCCESS);
 }
 
@@ -111,13 +122,14 @@ int main(int argc, char* argv[])
 	if (bind(server_socket, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) 
 	{
 		error("Failed to bind.");
-		shutdown(server_socket, 2);
+		shutdown(server_socket, SHUT_RDWR);
 		exit(EXIT_FAILURE);
 	}
 	
 	listen(server_socket, user_count);
 	
 	// waiting for incoming connection
+	cout << "server address : " << inet_ntoa(server_addr.sin_addr) << endl;
 	cout << "Waiting for incoming connections..." << endl;
 	client_len = sizeof(struct sockaddr_in);
 	
@@ -129,7 +141,7 @@ int main(int argc, char* argv[])
         if(pthread_create(&client_tr[thread_count], NULL, client_handler, &new_socket) < 0)
         {
             error("Could not create thread.");
-            shutdown(server_socket, 2);
+            shutdown(server_socket, SHUT_RDWR);
         }
         else
         {
@@ -140,12 +152,12 @@ int main(int argc, char* argv[])
 	if(client_socket < 0)
 	{
 		error("Failed to accept client.");
-		shutdown(server_socket, 2);
+		shutdown(server_socket, SHUT_RDWR);
 		exit(EXIT_FAILURE);
 	}
 	
 	pthread_exit(NULL);
-	shutdown(server_socket, 2);
+	shutdown(server_socket, SHUT_RDWR);
 	exit(EXIT_SUCCESS);
 }
 
@@ -316,6 +328,6 @@ void* client_handler(void* cli_socket)
     	}
 	}
 	
-	shutdown(socket_id, 2);
+	shutdown(socket_id, SHUT_RDWR);
 	return 0;
 }

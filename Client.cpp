@@ -39,8 +39,8 @@ void quitHandler(int exit_code);
 
 void quitHandler(int signal_code)
 {
-	cout << endl << "User terminated client process." << endl;
-	shutdown(client_socket, 2);
+	shutdown(client_socket, SHUT_RDWR);
+	cout << endl << "User terminated client process." << endl;	
 	exit(EXIT_SUCCESS);
 }
 
@@ -124,7 +124,7 @@ int main(int argc, char* argv[])
 		}
     }
 	
-	shutdown(client_socket, 2);
+	shutdown(client_socket, SHUT_RDWR);
 	exit(EXIT_SUCCESS);
 }
 
