@@ -40,7 +40,7 @@ void quitHandler(int exit_code);
 void quitHandler(int signal_code)
 {
 	shutdown(client_socket, SHUT_RDWR);
-	cout << endl << "User terminated client process." << endl;	
+	cout << endl << ">User terminated client process." << endl;	
 	exit(EXIT_SUCCESS);
 }
 
@@ -50,9 +50,10 @@ int main(int argc, char* argv[])
 	string addr;
     string server_msg = "";
     char msg[BUFFER_SIZE];
+    bool logout = false;
     
     if (argc < 3) {
-    	error("Did not specify address and port number.");
+    	error("Did not specify address and port number.\n>Usage: ./Client <IP Address> <Port #>");
     	exit(EXIT_FAILURE);
     }
     
@@ -86,9 +87,9 @@ int main(int argc, char* argv[])
         exit(EXIT_FAILURE);
     }
     
-    cout << "Connected to " << inet_ntoa(server_addr.sin_addr) << endl;
+    cout << ">Connected to " << inet_ntoa(server_addr.sin_addr) << endl;
     
-    while(1)
+    while(!logout)
     {
     	// clear buffer
     	memset(msg, 0, BUFFER_SIZE);
@@ -103,6 +104,10 @@ int main(int argc, char* argv[])
         	{
         		cout << server_msg << endl;
         	}
+        	else if(server_msg.find("already logged in") != string::npos)
+        	{
+        		cout << server_msg << endl;
+        	}
         	else
         	{
         		string msg1;
@@ -110,25 +115,36 @@ int main(int argc, char* argv[])
 				getline(cin, msg1);
 				strcpy(msg, msg1.c_str());
 				
+				if(strlen(msg) == 0)
+				{
+					sprintf(msg, "nop");
+				}
+				
 				if(send(client_socket, msg, strlen(msg), 0) < 0)
 				{
-					error("Failed to send a message to server.");
-					break;
+					error("Connection lost, please reconnect.");
+					logout = true;
+				}
+				
+				if(msg1.compare("logout") == 0)
+				{
+					logout = true;
 				}
         	}
         }
         else
         {
-        	error("Failed to receive a message from server.");
-       		break;
+        	error("Connection lost, please reconnect.");
+       		logout = true;
 		}
     }
 	
+	cout << ">Exited chat room." << endl;
 	shutdown(client_socket, SHUT_RDWR);
 	exit(EXIT_SUCCESS);
 }
 
 void error(string str)
 {
-	cout << "ERROR: " << str << endl;
+	cout << ">ERROR: " << str << endl;
 }
