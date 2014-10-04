@@ -48,11 +48,17 @@ typedef struct client_t
 	pthread_t client_tr;
 }client;
 
+typedef struct blocked_info_t
+{
+	string username;
+	map<string, time_t> ip_address;
+}blocked_info;
+
 /******************* Global Variables ****************************/
 map<string, string> user_id;
 map<string, client> login_users;
 
-map<string, client> blocked_users;
+map<string, blocked_info> blocked_users;
 
 int server_socket;
 int client_socket;
@@ -188,8 +194,6 @@ void load_user_info(void)
 	{
 		inFile >> user >> pass;
 		
-		/*cout << user[user_count] << ", " << user[user_count].size() << ", ";
-		cout << pass[user_count] << ", " << pass[user_count].size() << endl;*/
 		if(user.size() != 0 || pass.size() != 0)
 		{
 			//end of the file reached, do not add user count
@@ -257,6 +261,38 @@ void* client_handler(void* cur_client)
         	break;
 		}
 		
+		if(blocked_users.count(username) == 1)
+		{
+			string current_ip = string(inet_ntoa(current.client_addr.sin_addr));
+			
+			if(blocked_users[username].ip_address.count(current_ip) == 1)
+			{
+				time_t current_time;
+				time(&current_time);			//get the current time
+				
+				double seconds = difftime(current_time, blocked_users[username].ip_address[current_ip]);
+				
+				if(seconds <= BLOCK_TIME)
+				{
+					login_count = 0;
+					sprintf(msg, ">%s is blocked for %.1f second(s) from current ip.", username.c_str(), ((double)BLOCK_TIME - seconds));
+				}
+				else
+				{
+					// lift the block on this user from blocked list 
+					// if there is only 1 ip block, 
+					// otherwise remove the blocking ip
+					if(blocked_users[username].ip_address.size() == 1)
+					{
+						blocked_users.erase(username);
+					}
+					else
+					{
+						blocked_users[username].ip_address.erase(current_ip);
+					}
+				}
+			}
+		}
 		// check if the username exists in the list
 		if(user_id.count(username) == 0)
 		{
@@ -269,7 +305,7 @@ void* client_handler(void* cur_client)
 			{
 				login_count++;
 			}
-			else
+			else if(blocked_users.count(username) == 0)
 			{	
 				if(login_users.count(username) == 1) 
 				{
@@ -277,10 +313,6 @@ void* client_handler(void* cur_client)
 					already_in = true;
 					sprintf(msg, ">%s has already logged in.", username.c_str());
 				}
-				/*else if(blocked_users.count(username) == 1)
-				{
-					if(blocked_users[username].client_addr)
-				}*/
 				else 
 				{
 					current.username = username;
@@ -294,22 +326,37 @@ void* client_handler(void* cur_client)
 		
 		if(!logged_in)
 		{
-			if(login_count < 3 && !already_in)
+			if(login_count < 3 && !already_in && blocked_users.count(username) == 0)
 			{
 				sprintf(msg, ">Authentication failed, please try again. Attempt = %d.", login_count);
 			}
-			else if(!already_in)
+			else if(!already_in && blocked_users.count(username) == 0)
 			{
-				/*client block_ip_user;
-				memcpy(&block_ip_user, &current, sizeof(current));
-				
+				blocked_info block_ip_user;	
 				time_t time_stamp;
 				time(&time_stamp);
-				block_ip_user.time_stamp = time_stamp;
+				
+				block_ip_user.username = username;
+				block_ip_user.ip_address[string(inet_ntoa(current.client_addr.sin_addr))] = time_stamp;
 				blocked_users[username] = block_ip_user;
 				
-				login_count = 0;*/
+				login_count = 0;
 				sprintf(msg, ">Authentication failed 3 times, %s is blocked for %d second(s) from current ip.", username.c_str(), BLOCK_TIME);
+			}
+			else if(blocked_users.count(username) == 1)
+			{
+				//adding new blocking ip to existing bloced user
+				string current_ip = string(inet_ntoa(current.client_addr.sin_addr));
+				
+				if(blocked_users[username].ip_address.count(current_ip) == 0)
+				{
+					time_t time_stamp;
+					time(&time_stamp);
+				
+					blocked_users[username].ip_address[current_ip] = time_stamp;
+					login_count = 0;
+					sprintf(msg, ">Authentication failed 3 times, %s is blocked for %d second(s) from current ip.", username.c_str(), BLOCK_TIME);
+				}
 			}
 		}
 		
@@ -321,16 +368,19 @@ void* client_handler(void* cur_client)
 		
 	}while(!logged_in);
 	
-	login_users[username] = current;
+	if(logged_in)
+	{
+		login_users[username] = current;
+		memset(msg, 0, CLIENT_BUFF_SIZE);
+		sprintf(msg, ">%s: ", (current.username).c_str());
+		if(send(current.socket_id, msg, strlen(msg), 0) < 0)
+		{
+			error("Connection lost.");
+			logged_in = false;
+		}
+	}
 	
 	int msg_len = 0;
-	memset(msg, 0, CLIENT_BUFF_SIZE);
-	sprintf(msg, ">%s: ", (current.username).c_str());
-	if(send(current.socket_id, msg, strlen(msg), 0) < 0)
-	{
-		error("Connection lost.");
-    	logged_in = false;
-	}
 	
 	while(logged_in)
 	{

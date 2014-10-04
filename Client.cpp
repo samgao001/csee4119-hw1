@@ -123,6 +123,10 @@ int main(int argc, char* argv[])
 		    	{
 		    		cout << server_msg << endl;
 		    	}
+		    	else if(server_msg.find("blocked") != string::npos)
+		    	{
+		    		cout << server_msg << endl;
+		    	}
 		    	else
 		    	{
 		    		string msg1;
