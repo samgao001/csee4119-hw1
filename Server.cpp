@@ -17,6 +17,7 @@
 #include <fstream>
 #include <sstream>
 #include <map>
+#include <time.h>
 
 #include <sys/types.h> 
 #include <sys/socket.h>
@@ -28,16 +29,21 @@ using namespace std;
 
 /******************* User Defines ********************************/
 
+#define BLOCK_TIME			60
+#define TIME_OUT			30
+
 #define USER_FILE			"user_pass.txt"
 #define MAX_USER			256
 #define USER_PASS_SIZE		32
 #define CLIENT_BUFF_SIZE	512
-#define BLOCK_TIME			60
+
+#define TIMEOUT_SECONDS		TIME_OUT * 60
 
 typedef struct client_t
 {
 	int socket_id;
 	string username;
+	struct sockaddr_in client_addr;
 	time_t time_stamp;
 	pthread_t client_tr;
 }client;
@@ -45,6 +51,8 @@ typedef struct client_t
 /******************* Global Variables ****************************/
 map<string, string> user_id;
 map<string, client> login_users;
+
+map<string, client> blocked_users;
 
 int server_socket;
 int client_socket;
@@ -59,19 +67,6 @@ void* client_handler(void* current);
 void quitHandler(int signal_code);
 
 /******************* Main program ********************************/
-
-void quitHandler(int signal_code)
-{
-	for(map<string, client>::iterator itr=login_users.begin(); itr!=login_users.end(); ++itr)
-	{
-		shutdown((*itr).second.socket_id, SHUT_RDWR);
-	}
-
-	printf("\n>User terminated server process.\n");
-	shutdown(server_socket, SHUT_RDWR);
-	exit(EXIT_SUCCESS);
-}
-
 int main(int argc, char* argv[])
 {
 	int new_socket;
@@ -124,7 +119,7 @@ int main(int argc, char* argv[])
 	listen(server_socket, user_id.size());
 	
 	// waiting for incoming connection
-	cout << ">server address : " << inet_ntoa(server_addr.sin_addr) << endl;
+	cout << ">server address:  " << inet_ntoa(server_addr.sin_addr) << endl;
 	cout << ">Waiting for incoming connections..." << endl;
 	client_len = sizeof(struct sockaddr_in);
 	
@@ -137,6 +132,7 @@ int main(int argc, char* argv[])
 		
         new_client.socket_id = client_socket;
         new_client.client_tr = client_tr;
+        new_client.client_addr = client_addr;
         
         if(pthread_create(&(new_client.client_tr), NULL, client_handler, &new_client) < 0)
         {
@@ -153,6 +149,18 @@ int main(int argc, char* argv[])
 	}
 	
 	pthread_exit(NULL);
+	shutdown(server_socket, SHUT_RDWR);
+	exit(EXIT_SUCCESS);
+}
+
+void quitHandler(int signal_code)
+{
+	for(map<string, client>::iterator itr=login_users.begin(); itr!=login_users.end(); ++itr)
+	{
+		shutdown((*itr).second.socket_id, SHUT_RDWR);
+	}
+
+	printf("\n>User terminated server process.\n");
 	shutdown(server_socket, SHUT_RDWR);
 	exit(EXIT_SUCCESS);
 }
@@ -269,6 +277,10 @@ void* client_handler(void* cur_client)
 					already_in = true;
 					sprintf(msg, ">%s has already logged in.", username.c_str());
 				}
+				/*else if(blocked_users.count(username) == 1)
+				{
+					if(blocked_users[username].client_addr)
+				}*/
 				else 
 				{
 					current.username = username;
@@ -283,9 +295,22 @@ void* client_handler(void* cur_client)
 		if(!logged_in)
 		{
 			if(login_count < 3 && !already_in)
+			{
 				sprintf(msg, ">Authentication failed, please try again. Attempt = %d.", login_count);
+			}
 			else if(!already_in)
-				sprintf(msg, ">Authentication failed 3 times, you are now blocked for %d second(s).", BLOCK_TIME);
+			{
+				/*client block_ip_user;
+				memcpy(&block_ip_user, &current, sizeof(current));
+				
+				time_t time_stamp;
+				time(&time_stamp);
+				block_ip_user.time_stamp = time_stamp;
+				blocked_users[username] = block_ip_user;
+				
+				login_count = 0;*/
+				sprintf(msg, ">Authentication failed 3 times, %s is blocked for %d second(s) from current ip.", username.c_str(), BLOCK_TIME);
+			}
 		}
 		
 		if(send(current.socket_id, msg, strlen(msg), 0) < 0)
@@ -294,39 +319,32 @@ void* client_handler(void* cur_client)
         	break;
     	}
 		
-	}while((!logged_in) && (login_count < 3));
+	}while(!logged_in);
 	
 	login_users[username] = current;
 	
 	int msg_len = 0;
-	bool init_msg = true;
+	memset(msg, 0, CLIENT_BUFF_SIZE);
+	sprintf(msg, ">%s: ", (current.username).c_str());
+	if(send(current.socket_id, msg, strlen(msg), 0) < 0)
+	{
+		error("Connection lost.");
+    	logged_in = false;
+	}
 	
 	while(logged_in)
 	{
-		if(init_msg)
-		{
-			memset(msg, 0, CLIENT_BUFF_SIZE);
-			sprintf(msg, ">%s :", (current.username).c_str());
-			if(send(current.socket_id, msg, strlen(msg), 0) < 0)
-			{
-				error("Connection lost.");
-		    	logged_in = false;
-			}
-    	}
-		
 		// Receive a message from client
 		memset(msg, 0, CLIENT_BUFF_SIZE);
 		msg_len = recv(current.socket_id, msg, CLIENT_BUFF_SIZE, 0);
 		if(msg_len > 0)
     	{
-    		init_msg = true;
     		string rec_msg = string(msg);
     		
     		if((rec_msg.size() < 6) && (rec_msg.compare("nop") != 0))
     		{
     			memset(msg, 0, CLIENT_BUFF_SIZE);
-    			sprintf(msg, ">Invalid command.\n>%s :", (current.username).c_str());
-    			init_msg = false;
+    			sprintf(msg, ">Invalid command.\n>%s: ", (current.username).c_str());
     			
     			if(send(current.socket_id, msg, strlen(msg), 0) < 0)
 				{
@@ -336,14 +354,23 @@ void* client_handler(void* cur_client)
     		}
     		else
     		{
-    			if(rec_msg.compare("--help") == 0)
+    			if(rec_msg.compare("nop") == 0)
+    			{
+    				memset(msg, 0, CLIENT_BUFF_SIZE);
+					sprintf(msg, ">%s: ", (current.username).c_str());
+					if(send(current.socket_id, msg, strlen(msg), 0) < 0)
+					{
+						error("Connection lost.");
+						logged_in = false;
+					}
+    			}
+    			else if(rec_msg.compare("--help") == 0)
     			{
     				sprintf(msg, ">whoelse                  : Displays name of other connected users\n");
     				sprintf(msg, "%s>wholasthr                : Displays name of only those users that connected withint last hr.\n", msg);
 					sprintf(msg, "%s>broadcast <message>      : Broadcast <message> too all connected users.\n", msg);
 					sprintf(msg, "%s>message <user> <message> : Private <message> to a <user>.\n", msg);
-					sprintf(msg, "%s>logout                   : log out this user.\n>%s :", msg, (current.username).c_str());
-					init_msg = false;
+					sprintf(msg, "%s>logout                   : log out this user.\n>%s: ", msg, (current.username).c_str());
 					
 					if(send(current.socket_id, msg, strlen(msg), 0) < 0)
 					{
@@ -357,51 +384,50 @@ void* client_handler(void* cur_client)
     			}
     			else if(rec_msg.compare("whoelse") == 0)
     			{
-    				init_msg = false;
-    				
     				memset(msg, 0, CLIENT_BUFF_SIZE);
-    				for(map<string, client>::iterator itr=login_users.begin(); itr!=login_users.end(); ++itr)
-					{
-						if(itr == login_users.begin())
-							sprintf(msg, "\t>%s\n", ((*itr).first).c_str());
-						else
-							sprintf(msg, "%s\t>%s\n", msg, ((*itr).first).c_str());
-					}
-					sprintf(msg, "%s>%s :", msg, (current.username).c_str());
-					
-					if(send(current.socket_id, msg, strlen(msg), 0) < 0)
-					{
-						error("Connection lost.");
-						logged_in = false;
-					}
+     				for(map<string, client>::iterator itr=login_users.begin(); itr!=login_users.end(); ++itr)
+ 					{
+ 						if(itr == login_users.begin())
+ 							sprintf(msg, "\t%s\n", ((*itr).first).c_str());
+ 						else
+ 							sprintf(msg, "%s\t%s\n", msg, ((*itr).first).c_str());
+ 					}
+ 					sprintf(msg, "%s>%s: ", msg, (current.username).c_str());
+ 					
+ 					if(send(current.socket_id, msg, strlen(msg), 0) < 0)
+ 					{
+ 						error("Connection lost.");
+ 						logged_in = false;
+ 					}
     			}
     			else if(rec_msg.compare("wholasthr") == 0)
     			{
-    				init_msg = false;
-    				
     				memset(msg, 0, CLIENT_BUFF_SIZE);
-    				for(map<string, client>::iterator itr=login_users.begin(); itr!=login_users.end(); ++itr)
-					{
-						if(itr == login_users.begin())
-							sprintf(msg, "\t>%s\n", ((*itr).first).c_str());
-						else
-							sprintf(msg, "%s\t>%s\n", msg, ((*itr).first).c_str());
-					}
-					sprintf(msg, "%s>%s :", msg, (current.username).c_str());
-					
-					if(send(current.socket_id, msg, strlen(msg), 0) < 0)
-					{
-						error("Connection lost.");
-						logged_in = false;
-					}
+     				for(map<string, client>::iterator itr=login_users.begin(); itr!=login_users.end(); ++itr)
+ 					{
+ 						if(itr == login_users.begin())
+ 							sprintf(msg, "\t%s\n", ((*itr).first).c_str());
+ 						else
+ 							sprintf(msg, "%s\t%s\n", msg, ((*itr).first).c_str());
+ 					}
+ 					sprintf(msg, "%s>%s: ", msg, (current.username).c_str());
+ 					
+ 					if(send(current.socket_id, msg, strlen(msg), 0) < 0)
+ 					{
+ 						error("Connection lost.");
+ 						logged_in = false;
+ 					}
     			}
     			else
     			{	
-    				init_msg = false;
-    				
     				int first_white_space = rec_msg.find_first_of(' ');
     				string command = rec_msg.substr(0, first_white_space);
-    				string remain_msg = rec_msg.substr(first_white_space + 1); 
+    				string remain_msg = " "; 
+    				
+    				if(rec_msg.size() > first_white_space + 1)
+					{
+						remain_msg = rec_msg.substr(first_white_space + 1);
+					}
     				
     				if(command.compare("broadcast") == 0)
     				{
@@ -410,8 +436,8 @@ void* client_handler(void* cur_client)
 							string usr = (*itr).first;
 							int usr_socket = (*itr).second.socket_id;
 							memset(msg, 0, CLIENT_BUFF_SIZE);
-    						sprintf(msg, "><BROADCAST> %s :%s\n", (current.username).c_str(), remain_msg.c_str());
-							sprintf(msg, "%s>%s :", msg, usr.c_str());
+    						sprintf(msg, "\n\t<BROADCAST> %s: %s\n", (current.username).c_str(), remain_msg.c_str());
+							sprintf(msg, "%s>%s: ", msg, usr.c_str());
 							
 							if(send(usr_socket, msg, strlen(msg), 0) < 0)
 							{
@@ -425,16 +451,27 @@ void* client_handler(void* cur_client)
     				{
     					int next_white_space = remain_msg.find_first_of(' ');
     					string target = remain_msg.substr(0, next_white_space);
-    					string msg_to_target = remain_msg.substr(next_white_space + 1);
+    					string msg_to_target = " ";
     					
-    					memset(msg, 0, CLIENT_BUFF_SIZE);
-    					
+    					if(remain_msg.size() > next_white_space + 1)
+    					{
+    						msg_to_target = remain_msg.substr(next_white_space + 1);
+    					}
+
     					if(login_users.count(target) == 1)
     					{
-    						sprintf(msg, ">%s :%s\n", target.c_str(), msg_to_target.c_str());
-							sprintf(msg, "%s>%s :", msg, (current.username).c_str());
-    						
+    						memset(msg, 0, CLIENT_BUFF_SIZE);
+    						sprintf(msg, "\n>%s: %s\n", (current.username).c_str(), msg_to_target.c_str());
     						if(send(login_users[target].socket_id, msg, strlen(msg), 0) < 0)
+							{
+								cout << ">" << target << " has lost connection." <<endl;
+								shutdown(login_users[target].socket_id, SHUT_RDWR);
+								login_users.erase(target);
+							}
+							
+							memset(msg, 0, CLIENT_BUFF_SIZE);
+							sprintf(msg, ">%s: ", target.c_str());
+							if(send(login_users[target].socket_id, msg, strlen(msg), 0) < 0)
 							{
 								cout << ">" << target << " has lost connection." <<endl;
 								shutdown(login_users[target].socket_id, SHUT_RDWR);
@@ -443,15 +480,22 @@ void* client_handler(void* cur_client)
     					}
     					else
     					{
+    						memset(msg, 0, CLIENT_BUFF_SIZE);
     						sprintf(msg, ">%s is currently offline.\n", target.c_str());
-							sprintf(msg, "%s>%s :", msg, (current.username).c_str());
-							
-							if(send(current.socket_id, msg, strlen(msg), 0) < 0)
+    						if(send(current.socket_id, msg, strlen(msg), 0) < 0)
 							{
 								error("Connection lost.");
 								logged_in = false;
 							}
     					}
+    					
+    					memset(msg, 0, CLIENT_BUFF_SIZE);
+						sprintf(msg, ">%s: ", (current.username).c_str());
+						if(send(current.socket_id, msg, strlen(msg), 0) < 0)
+						{
+							error("Connection lost.");
+							logged_in = false;
+						}
     				}
     			}
     		}
