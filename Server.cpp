@@ -32,6 +32,8 @@ using namespace std;
 #define BLOCK_TIME			60
 #define TIME_OUT			30
 
+#define ONE_HOUR_IN_SECONDS	3600
+
 #define USER_FILE			"user_pass.txt"
 #define MAX_USER			256
 #define USER_PASS_SIZE		32
@@ -57,7 +59,6 @@ typedef struct blocked_info_t
 /******************* Global Variables ****************************/
 map<string, string> user_id;
 map<string, client> login_users;
-
 map<string, blocked_info> blocked_users;
 
 int server_socket;
@@ -122,6 +123,7 @@ int main(int argc, char* argv[])
 		exit(EXIT_FAILURE);
 	}
 	
+	// it is expecting total user size. This server do not accept duplicate logins
 	listen(server_socket, user_id.size());
 	
 	// waiting for incoming connection
@@ -133,6 +135,7 @@ int main(int argc, char* argv[])
 	{	
 		cout << ">Client(" << inet_ntoa(client_addr.sin_addr) << ") accepted." << endl;
 		
+		// setup a new thread for a new connection
 		client new_client;
 		pthread_t client_tr;
 		
@@ -159,6 +162,10 @@ int main(int argc, char* argv[])
 	exit(EXIT_SUCCESS);
 }
 
+/**************************************************************/
+/*	quitHandler - capture process quit/stop/termination signals
+/* 				  and exit gracefully.
+/**************************************************************/
 void quitHandler(int signal_code)
 {
 	for(map<string, client>::iterator itr=login_users.begin(); itr!=login_users.end(); ++itr)
@@ -171,11 +178,18 @@ void quitHandler(int signal_code)
 	exit(EXIT_SUCCESS);
 }
 
+/**************************************************************/
+/*	error - Error msg helper function
+/**************************************************************/
 void error(string str)
 {
 	cout << ">ERROR: " << str << endl;
 }
 
+/**************************************************************/
+/*	load_user_info - load username - password combination from 
+/* 					 file.
+/**************************************************************/
 void load_user_info(void)
 {
 	string user = "";
@@ -205,6 +219,10 @@ void load_user_info(void)
 	inFile.close();
 }
 
+/**************************************************************/
+/*	client_handler - Client hander thread for each connected 
+/*					 client
+/**************************************************************/
 void* client_handler(void* cur_client)
 {
 	client current = *(client*) cur_client;
@@ -212,6 +230,7 @@ void* client_handler(void* cur_client)
 	int login_count = 0;
 	bool logged_in = false;
 	bool already_in = false;
+	string current_ip = string(inet_ntoa(current.client_addr.sin_addr));
 	
 	char msg[CLIENT_BUFF_SIZE];
 	string username = "";
@@ -261,10 +280,9 @@ void* client_handler(void* cur_client)
         	break;
 		}
 		
+		//check if the user is blocked
 		if(blocked_users.count(username) == 1)
-		{
-			string current_ip = string(inet_ntoa(current.client_addr.sin_addr));
-			
+		{			
 			if(blocked_users[username].ip_address.count(current_ip) == 1)
 			{
 				time_t current_time;
@@ -305,6 +323,7 @@ void* client_handler(void* cur_client)
 			{
 				login_count++;
 			}
+			// check only if this user is not blocked
 			else if(blocked_users.count(username) == 0)
 			{	
 				if(login_users.count(username) == 1) 
@@ -313,7 +332,25 @@ void* client_handler(void* cur_client)
 					already_in = true;
 					sprintf(msg, ">%s has already logged in.", username.c_str());
 				}
-				else 
+				else
+				{
+					current.username = username;
+					logged_in = true;
+					
+					sprintf(msg, ">Logged in successfully. Welcome to TheChat!\n>Type --help for commands.");
+				}
+				login_count = 0;
+			}
+			// check only if this user on current ip is not blocked
+			else if(blocked_users[username].ip_address.count(current_ip) == 0)
+			{
+				if(login_users.count(username) == 1) 
+				{
+					logged_in = false;
+					already_in = true;
+					sprintf(msg, ">%s has already logged in.", username.c_str());
+				}
+				else
 				{
 					current.username = username;
 					logged_in = true;
@@ -324,6 +361,7 @@ void* client_handler(void* cur_client)
 			}
 		}
 		
+		// build login failure msg accordingly
 		if(!logged_in)
 		{
 			if(login_count < 3 && !already_in && blocked_users.count(username) == 0)
@@ -332,12 +370,13 @@ void* client_handler(void* cur_client)
 			}
 			else if(!already_in && blocked_users.count(username) == 0)
 			{
+				// failed more than 3 times and the user is not blocked, then add this user to the blocked list
 				blocked_info block_ip_user;	
 				time_t time_stamp;
 				time(&time_stamp);
 				
 				block_ip_user.username = username;
-				block_ip_user.ip_address[string(inet_ntoa(current.client_addr.sin_addr))] = time_stamp;
+				block_ip_user.ip_address[current_ip] = time_stamp;
 				blocked_users[username] = block_ip_user;
 				
 				login_count = 0;
@@ -345,9 +384,7 @@ void* client_handler(void* cur_client)
 			}
 			else if(blocked_users.count(username) == 1)
 			{
-				//adding new blocking ip to existing bloced user
-				string current_ip = string(inet_ntoa(current.client_addr.sin_addr));
-				
+				//adding new blocking ip to existing bloced user			
 				if(blocked_users[username].ip_address.count(current_ip) == 0)
 				{
 					time_t time_stamp;
@@ -368,8 +405,13 @@ void* client_handler(void* cur_client)
 		
 	}while(!logged_in);
 	
+	// check if we successful log in this client.
+	// if so, setup user input prompt
 	if(logged_in)
 	{
+		time_t time_stamp;
+		time(&time_stamp);
+		current.time_stamp = time_stamp;
 		login_users[username] = current;
 		memset(msg, 0, CLIENT_BUFF_SIZE);
 		sprintf(msg, ">%s: ", (current.username).c_str());
@@ -391,6 +433,7 @@ void* client_handler(void* cur_client)
     	{
     		string rec_msg = string(msg);
     		
+    		// check if the message is less than len 6 and it is not nop
     		if((rec_msg.size() < 6) && (rec_msg.compare("nop") != 0))
     		{
     			memset(msg, 0, CLIENT_BUFF_SIZE);
@@ -404,6 +447,7 @@ void* client_handler(void* cur_client)
     		}
     		else
     		{
+    			// nop, send the user input prompt again
     			if(rec_msg.compare("nop") == 0)
     			{
     				memset(msg, 0, CLIENT_BUFF_SIZE);
@@ -414,6 +458,7 @@ void* client_handler(void* cur_client)
 						logged_in = false;
 					}
     			}
+    			// Usage command
     			else if(rec_msg.compare("--help") == 0)
     			{
     				sprintf(msg, ">whoelse                  : Displays name of other connected users\n");
@@ -428,19 +473,25 @@ void* client_handler(void* cur_client)
 						logged_in = false;
 					}
     			}
+    			// logout current user
     			else if(rec_msg.compare("logout") == 0)
     			{
     				logged_in = false;
     			}
+    			// command to see whoelse is on the list
     			else if(rec_msg.compare("whoelse") == 0)
     			{
     				memset(msg, 0, CLIENT_BUFF_SIZE);
      				for(map<string, client>::iterator itr=login_users.begin(); itr!=login_users.end(); ++itr)
  					{
  						if(itr == login_users.begin())
+ 						{
  							sprintf(msg, "\t%s\n", ((*itr).first).c_str());
+ 						}
  						else
+ 						{
  							sprintf(msg, "%s\t%s\n", msg, ((*itr).first).c_str());
+ 						}
  					}
  					sprintf(msg, "%s>%s: ", msg, (current.username).c_str());
  					
@@ -450,15 +501,27 @@ void* client_handler(void* cur_client)
  						logged_in = false;
  					}
     			}
+    			// command to see who is on since last hour
     			else if(rec_msg.compare("wholasthr") == 0)
     			{
     				memset(msg, 0, CLIENT_BUFF_SIZE);
      				for(map<string, client>::iterator itr=login_users.begin(); itr!=login_users.end(); ++itr)
  					{
- 						if(itr == login_users.begin())
- 							sprintf(msg, "\t%s\n", ((*itr).first).c_str());
- 						else
- 							sprintf(msg, "%s\t%s\n", msg, ((*itr).first).c_str());
+ 						time_t current_time;
+						time(&current_time);			//get the current time
+						double seconds = difftime(current_time, (*itr).second.time_stamp);
+						
+						if(seconds < ONE_HOUR_IN_SECONDS)
+						{
+	 						if(itr == login_users.begin())
+	 						{
+	 							sprintf(msg, "\t%s\n", ((*itr).first).c_str());
+	 						}
+	 						else
+	 						{
+	 							sprintf(msg, "%s\t%s\n", msg, ((*itr).first).c_str());
+	 						}
+ 						}
  					}
  					sprintf(msg, "%s>%s: ", msg, (current.username).c_str());
  					
@@ -468,85 +531,115 @@ void* client_handler(void* cur_client)
  						logged_in = false;
  					}
     			}
+    			// handle for broadcast and private msg
     			else
     			{	
+    				bool invalid = false;
     				int first_white_space = rec_msg.find_first_of(' ');
-    				string command = rec_msg.substr(0, first_white_space);
-    				string remain_msg = " "; 
     				
-    				if(rec_msg.size() > first_white_space + 1)
-					{
-						remain_msg = rec_msg.substr(first_white_space + 1);
-					}
-    				
-    				if(command.compare("broadcast") == 0)
+    				if(first_white_space != string::npos)
     				{
-    					for(map<string, client>::iterator itr=login_users.begin(); itr!=login_users.end(); ++itr)
+    					string command = rec_msg.substr(0, first_white_space);
+						string remain_msg = " "; 
+						
+						if(rec_msg.size() > first_white_space + 1)
 						{
-							string usr = (*itr).first;
-							int usr_socket = (*itr).second.socket_id;
-							memset(msg, 0, CLIENT_BUFF_SIZE);
-    						sprintf(msg, "\n\t<BROADCAST> %s: %s\n", (current.username).c_str(), remain_msg.c_str());
-							sprintf(msg, "%s>%s: ", msg, usr.c_str());
-							
-							if(send(usr_socket, msg, strlen(msg), 0) < 0)
+							remain_msg = rec_msg.substr(first_white_space + 1);
+						}
+						
+						if(command.compare("broadcast") == 0)
+						{
+							for(map<string, client>::iterator itr=login_users.begin(); itr!=login_users.end(); ++itr)
 							{
-								cout << ">" << usr << " has lost connection." <<endl;
-								login_users.erase(usr);
-								shutdown(usr_socket, SHUT_RDWR);
+								string usr = (*itr).first;
+								int usr_socket = (*itr).second.socket_id;
+								memset(msg, 0, CLIENT_BUFF_SIZE);
+								sprintf(msg, "\n\t<BROADCAST> %s: %s\n", (current.username).c_str(), remain_msg.c_str());
+								sprintf(msg, "%s>%s: ", msg, usr.c_str());
+							
+								if(send(usr_socket, msg, strlen(msg), 0) < 0)
+								{
+									cout << ">" << usr << " has lost connection." <<endl;
+									login_users.erase(usr);
+									shutdown(usr_socket, SHUT_RDWR);
+								}
 							}
 						}
-    				}
-    				else if(command.compare("message") == 0)
-    				{
-    					int next_white_space = remain_msg.find_first_of(' ');
-    					string target = remain_msg.substr(0, next_white_space);
-    					string msg_to_target = " ";
-    					
-    					if(remain_msg.size() > next_white_space + 1)
-    					{
-    						msg_to_target = remain_msg.substr(next_white_space + 1);
-    					}
-
-    					if(login_users.count(target) == 1)
-    					{
-    						memset(msg, 0, CLIENT_BUFF_SIZE);
-    						sprintf(msg, "\n>%s: %s\n", (current.username).c_str(), msg_to_target.c_str());
-    						if(send(login_users[target].socket_id, msg, strlen(msg), 0) < 0)
-							{
-								cout << ">" << target << " has lost connection." <<endl;
-								shutdown(login_users[target].socket_id, SHUT_RDWR);
-								login_users.erase(target);
-							}
+						else if(command.compare("message") == 0)
+						{
+							int next_white_space = remain_msg.find_first_of(' ');
 							
-							memset(msg, 0, CLIENT_BUFF_SIZE);
-							sprintf(msg, ">%s: ", target.c_str());
-							if(send(login_users[target].socket_id, msg, strlen(msg), 0) < 0)
-							{
-								cout << ">" << target << " has lost connection." <<endl;
-								shutdown(login_users[target].socket_id, SHUT_RDWR);
-								login_users.erase(target);
-							}
-    					}
-    					else
-    					{
-    						memset(msg, 0, CLIENT_BUFF_SIZE);
-    						sprintf(msg, ">%s is currently offline.\n", target.c_str());
-    						if(send(current.socket_id, msg, strlen(msg), 0) < 0)
-							{
-								error("Connection lost.");
-								logged_in = false;
-							}
-    					}
-    					
-    					memset(msg, 0, CLIENT_BUFF_SIZE);
-						sprintf(msg, ">%s: ", (current.username).c_str());
+							if(next_white_space != string::npos)
+    						{
+    							string target = remain_msg.substr(0, next_white_space);
+								string msg_to_target = " ";
+							
+								if(remain_msg.size() > next_white_space + 1)
+								{
+									msg_to_target = remain_msg.substr(next_white_space + 1);
+								}
+
+								if(login_users.count(target) == 1)
+								{
+									memset(msg, 0, CLIENT_BUFF_SIZE);
+									sprintf(msg, "\n>%s: %s\n", (current.username).c_str(), msg_to_target.c_str());
+									if(send(login_users[target].socket_id, msg, strlen(msg), 0) < 0)
+									{
+										cout << ">" << target << " has lost connection." <<endl;
+										shutdown(login_users[target].socket_id, SHUT_RDWR);
+										login_users.erase(target);
+									}
+							
+									memset(msg, 0, CLIENT_BUFF_SIZE);
+									sprintf(msg, ">%s: ", target.c_str());
+									if(send(login_users[target].socket_id, msg, strlen(msg), 0) < 0)
+									{
+										cout << ">" << target << " has lost connection." <<endl;
+										shutdown(login_users[target].socket_id, SHUT_RDWR);
+										login_users.erase(target);
+									}
+								}
+								else
+								{
+									memset(msg, 0, CLIENT_BUFF_SIZE);
+									sprintf(msg, ">%s is currently offline.\n", target.c_str());
+									if(send(current.socket_id, msg, strlen(msg), 0) < 0)
+									{
+										error("Connection lost.");
+										logged_in = false;
+									}
+								}
+							
+								memset(msg, 0, CLIENT_BUFF_SIZE);
+								sprintf(msg, ">%s: ", (current.username).c_str());
+								if(send(current.socket_id, msg, strlen(msg), 0) < 0)
+								{
+									error("Connection lost.");
+									logged_in = false;
+								}
+    						}
+    						else
+    						{
+    							invalid = true;
+    						}
+						}
+					}
+					else
+					{
+						invalid = true;
+					}
+					
+					if(invalid)
+					{
+						memset(msg, 0, CLIENT_BUFF_SIZE);
+						sprintf(msg, ">Invalid command.\n>%s: ", (current.username).c_str());
+					
 						if(send(current.socket_id, msg, strlen(msg), 0) < 0)
 						{
 							error("Connection lost.");
 							logged_in = false;
 						}
-    				}
+					}
     			}
     		}
     	}
