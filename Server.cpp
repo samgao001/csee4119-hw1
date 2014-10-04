@@ -325,7 +325,7 @@ void* client_handler(void* cur_client)
     		if((rec_msg.size() < 6) && (rec_msg.compare("nop") != 0))
     		{
     			memset(msg, 0, CLIENT_BUFF_SIZE);
-    			sprintf(msg, ">Invalid command.\n%s :", (current.username).c_str());
+    			sprintf(msg, ">Invalid command.\n>%s :", (current.username).c_str());
     			init_msg = false;
     			
     			if(send(current.socket_id, msg, strlen(msg), 0) < 0)
@@ -374,6 +374,85 @@ void* client_handler(void* cur_client)
 						error("Connection lost.");
 						logged_in = false;
 					}
+    			}
+    			else if(rec_msg.compare("wholasthr") == 0)
+    			{
+    				init_msg = false;
+    				
+    				memset(msg, 0, CLIENT_BUFF_SIZE);
+    				for(map<string, client>::iterator itr=login_users.begin(); itr!=login_users.end(); ++itr)
+					{
+						if(itr == login_users.begin())
+							sprintf(msg, "\t>%s\n", ((*itr).first).c_str());
+						else
+							sprintf(msg, "%s\t>%s\n", msg, ((*itr).first).c_str());
+					}
+					sprintf(msg, "%s>%s :", msg, (current.username).c_str());
+					
+					if(send(current.socket_id, msg, strlen(msg), 0) < 0)
+					{
+						error("Connection lost.");
+						logged_in = false;
+					}
+    			}
+    			else
+    			{	
+    				init_msg = false;
+    				
+    				int first_white_space = rec_msg.find_first_of(' ');
+    				string command = rec_msg.substr(0, first_white_space);
+    				string remain_msg = rec_msg.substr(first_white_space + 1); 
+    				
+    				if(command.compare("broadcast") == 0)
+    				{
+    					for(map<string, client>::iterator itr=login_users.begin(); itr!=login_users.end(); ++itr)
+						{
+							string usr = (*itr).first;
+							int usr_socket = (*itr).second.socket_id;
+							memset(msg, 0, CLIENT_BUFF_SIZE);
+    						sprintf(msg, "><BROADCAST> %s :%s\n", (current.username).c_str(), remain_msg.c_str());
+							sprintf(msg, "%s>%s :", msg, usr.c_str());
+							
+							if(send(usr_socket, msg, strlen(msg), 0) < 0)
+							{
+								cout << ">" << usr << " has lost connection." <<endl;
+								login_users.erase(usr);
+								shutdown(usr_socket, SHUT_RDWR);
+							}
+						}
+    				}
+    				else if(command.compare("message") == 0)
+    				{
+    					int next_white_space = remain_msg.find_first_of(' ');
+    					string target = remain_msg.substr(0, next_white_space);
+    					string msg_to_target = remain_msg.substr(next_white_space + 1);
+    					
+    					memset(msg, 0, CLIENT_BUFF_SIZE);
+    					
+    					if(login_users.count(target) == 1)
+    					{
+    						sprintf(msg, ">%s :%s\n", target.c_str(), msg_to_target.c_str());
+							sprintf(msg, "%s>%s :", msg, (current.username).c_str());
+    						
+    						if(send(login_users[target].socket_id, msg, strlen(msg), 0) < 0)
+							{
+								cout << ">" << target << " has lost connection." <<endl;
+								shutdown(login_users[target].socket_id, SHUT_RDWR);
+								login_users.erase(target);
+							}
+    					}
+    					else
+    					{
+    						sprintf(msg, ">%s is currently offline.\n", target.c_str());
+							sprintf(msg, "%s>%s :", msg, (current.username).c_str());
+							
+							if(send(current.socket_id, msg, strlen(msg), 0) < 0)
+							{
+								error("Connection lost.");
+								logged_in = false;
+							}
+    					}
+    				}
     			}
     		}
     	}
