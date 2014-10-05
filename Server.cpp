@@ -71,6 +71,7 @@ void load_user_info(void);
 void error(string str);
 
 void* client_handler(void* current);
+void* timeout_handler(void*);
 void quitHandler(int signal_code);
 
 /******************* Main program ********************************/
@@ -130,6 +131,13 @@ int main(int argc, char* argv[])
 	cout << ">server address:  " << inet_ntoa(server_addr.sin_addr) << endl;
 	cout << ">Waiting for incoming connections..." << endl;
 	client_len = sizeof(struct sockaddr_in);
+	
+	pthread_t timeout_tr;
+    if(pthread_create(&timeout_tr, NULL, timeout_handler, &server_socket) < 0)
+    {
+        error("Could not create thread.");
+        shutdown(server_socket, SHUT_RDWR);
+    }
 	
 	while( (client_socket = accept(server_socket, (struct sockaddr *)&client_addr, (socklen_t*)&client_len)) )
 	{	
@@ -421,7 +429,7 @@ void* client_handler(void* cur_client)
 			logged_in = false;
 		}
 	}
-	
+
 	int msg_len = 0;
 	
 	while(logged_in)
@@ -431,6 +439,12 @@ void* client_handler(void* cur_client)
 		msg_len = recv(current.socket_id, msg, CLIENT_BUFF_SIZE, 0);
 		if(msg_len > 0)
     	{
+    		time_t current_time;
+			time(&current_time);
+    		
+    		//update time stamp whenever there is a incoming msg.
+    		current.time_stamp = current_time;
+    		
     		string rec_msg = string(msg);
     		
     		// check if the message is less than len 6 and it is not nop
@@ -654,4 +668,45 @@ void* client_handler(void* cur_client)
 	login_users.erase(username);
 	shutdown(current.socket_id, SHUT_RDWR);
 	return 0;
+}
+
+void* timeout_handler(void* server_socket)
+{
+	while(1)
+	{
+		if(login_users.size() > 0)
+		{
+			for(map<string, client>::iterator itr=login_users.begin(); itr!=login_users.end(); ++itr)
+			{
+				time_t current_time;
+				time(&current_time);
+			
+				string usr = (*itr).first;
+				int usr_socket = (*itr).second.socket_id;
+				
+				double seconds = difftime(current_time, (*itr).second.time_stamp);
+				
+				if(seconds >= TIMEOUT_SECONDS)
+				{
+					char msg[CLIENT_BUFF_SIZE];
+					memset(msg, 0, CLIENT_BUFF_SIZE);
+					sprintf(msg, "\n%s has been inactive for more than %.2f hours. It is now forced logout.\n", usr.c_str(), ((double)TIMEOUT_SECONDS / 3600.0));
+	
+					if(send(usr_socket, msg, strlen(msg), 0) < 0)
+					{
+						cout << ">" << usr << " was disconnected." <<endl;
+						login_users.erase(usr);
+						shutdown(usr_socket, SHUT_RDWR);
+					}
+					
+					cout << ">" << usr << " is being kicked out." <<endl;
+					login_users.erase(usr);
+					shutdown(usr_socket, SHUT_RDWR);
+				}
+			}
+		}
+		
+		//sleep every 5 second. error in time to kick out user is 5 second. 
+		sleep(5);
+	}
 }
